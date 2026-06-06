@@ -1,107 +1,245 @@
+<div align="center">
+
+![AI Interview Co-Pilot](docs/banner.png)
+
 # AI Interview Co-Pilot
 
-A monorepo skeleton implementing the Data Flow Diagram you sketched: a Chrome
-extension captures meeting audio, a FastAPI backend streams it through Deepgram
-Nova-2 and asks GitHub Models for real-time interviewing hints, a Next.js
-dashboard renders transcripts + hints live, and PostgreSQL holds the trail.
+**A real-time interview assistant** — it captures meeting audio, transcribes it live with Deepgram, and uses LLMs (GitHub Models with automatic Gemini failover) to surface interviewer rubrics or candidate answers on a live dashboard.
 
-> **Status:** scaffolding only. The audio path, Deepgram client, and GitHub
-> Models call site are wired through with stub implementations so the full
-> control plane (sessions, websockets, dispatcher, DB writes, REST + Next.js
-> pages) is reviewable end-to-end. Drop in the API keys and replace the
-> three TODOs to go live.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)
+![Next.js](https://img.shields.io/badge/Web-Next.js%2015-black?logo=nextdotjs)
+![Chrome MV3](https://img.shields.io/badge/Extension-Chrome%20MV3-4285F4?logo=googlechrome&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL-4169E1?logo=postgresql&logoColor=white)
+![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)
 
-## Repo layout
+[Features](#-features) · [Quick start](#-quick-start) · [How it works](#%EF%B8%8F-how-it-works) · [Configuration](#%EF%B8%8F-configuration) · [Troubleshooting](#-troubleshooting)
 
-```
-ai-interview-copilot/
-├── apps/
-│   ├── api/          # FastAPI + SQLModel (P3, P4, P5, P6, D1)
-│   ├── web/          # Next.js 15 dashboard (P7, P8)
-│   └── extension/    # Chrome MV3 extension (P1, P2)
-├── packages/
-│   └── shared/       # TypeScript types shared by web + extension
-├── docker-compose.yml
-├── .env.example
-├── pnpm-workspace.yaml
-└── package.json
-```
+</div>
 
-## DFD → file map
+---
 
-| DFD element                         | Lives in                                                  |
-| ----------------------------------- | --------------------------------------------------------- |
-| **P1** Audio Capture (Offscreen)    | `apps/extension/src/offscreen/offscreen.ts`               |
-| **P2** Session Initializer (panel)  | `apps/extension/src/sidepanel/App.tsx`                    |
-| **P3** WebSocket Router             | `apps/api/app/routers/live_stream.py`                     |
-| **P4** Streaming Transcriber        | `apps/api/app/services/deepgram.py`                       |
-| **P5** Real-Time Evaluator          | `apps/api/app/services/github_models.py`                  |
-| **P6** Frontend Dispatch            | `apps/api/app/services/dispatcher.py` + `routers/live_feed.py` |
-| **P7** Past Reviews View            | `apps/web/src/app/reports/page.tsx`                       |
-| **P8** Co-Pilot Dashboard           | `apps/web/src/app/interview/live/page.tsx`                |
-| **D1** Postgres entities            | `apps/api/app/models/*.py`                                |
+> [!IMPORTANT]
+> **Please use this responsibly.** The tool records and transcribes live audio. Always get **explicit consent** from everyone on a call before recording, and follow your local laws (many regions require all-party consent). It is intended for **interview practice, self-review, and interviewer assistance** — not for deceiving anyone in a real hiring process.
 
-## Prerequisites
+---
 
-- Node 20+ (you have 22 ✓)
-- pnpm 9+ — already activated via `corepack enable`
-- Docker / Docker Desktop
-- (optional) Python 3.11 + [uv](https://docs.astral.sh/uv/) for running the API on the host
+## 👀 See it in action
 
-## Quick start
+The live dashboard shows the running transcript, AI-suggested answers/rubrics, and an auto-generated question bank — all updating in real time as the conversation happens.
+
+![Live dashboard](docs/dashboard.png)
+
+---
+
+## ✨ Features
+
+| | Feature | What it does |
+|---|---|---|
+| 🔴 | **Live transcription** | Streams meeting audio to Deepgram Nova-2 and shows the transcript as people speak. |
+| 🧠 | **Real-time AI hints** | **Interviewer mode** gives expected-answer rubrics, follow-ups, and red flags. **Interviewee mode** gives ready-to-say answers (and even solves coding/SQL/DSA problems). |
+| 📄 | **Drag-and-drop resume & JD** | Drop a **PDF / DOCX / TXT** and the backend extracts the text automatically (`pypdf`, `python-docx`) — no copy-paste needed. |
+| ❓ | **Ask box** | Paste any question and instantly get an answer or an evaluation rubric. |
+| 🗂️ | **Auto question bank** | Generates a topic-by-topic bank ramped Easy → Hard from the detected tech stack. |
+| 📊 | **Final report** | Scores, strengths/weaknesses, and a hire recommendation — saved to PostgreSQL. |
+| 🔁 | **LLM failover** | Primary **GitHub Models**, automatic fallback to **Google Gemini** when rate-limited, with smart per-provider cooldowns. |
+| 🛠️ | **One-command stack** | Spin up everything with the friendly `./copilot` CLI. |
+
+---
+
+## 🚀 Quick start
+
+### 1️⃣ Prerequisites
+
+- **Docker / Docker Desktop** — runs Postgres, pgAdmin, the API, and the web app
+- **Node 20+** and **pnpm 9+** — to build the Chrome extension
+- **Google Chrome 116+**
+- **API keys** (all free to start):
+  - 🎙️ [Deepgram](https://console.deepgram.com/) — required for transcription
+  - 🤖 [GitHub Models](https://github.com/marketplace/models) **and/or** [Google AI Studio (Gemini)](https://aistudio.google.com/apikey) — at least one for the AI features
+
+### 2️⃣ Configure
 
 ```bash
-# 1. Configure environment
-cp .env.example .env
+git clone https://github.com/robynsyngh/ai-interview-copilot
+cd ai-interview-copilot
+cp .env.example .env      # then paste your keys into .env
+```
 
-# 2. Install JS deps for all workspace packages
-pnpm install
+### 3️⃣ Start the backend, web app & database
 
-# 3. Bring up Postgres + pgAdmin + the FastAPI API
+```bash
 docker compose up -d --build
-docker compose logs -f api    # wait for "Application startup complete"
-
-# 4. In a second terminal, run the Next.js dashboard
-pnpm dev:web                  # http://localhost:3000
-
-# 5. In a third terminal, build the Chrome extension
-pnpm dev:ext                  # produces apps/extension/dist (watch mode)
-#    then load apps/extension/dist as an unpacked extension at chrome://extensions
+# …or use the helper CLI:
+./copilot start
 ```
 
-## Service URLs
+| Service | URL |
+|---|---|
+| 🖥️ Web dashboard | http://localhost:3000 |
+| ⚙️ API + interactive docs | http://localhost:8000 · http://localhost:8000/docs |
+| 🗄️ pgAdmin | http://localhost:5050 |
 
-| Service       | URL                                  |
-| ------------- | ------------------------------------ |
-| FastAPI       | http://localhost:8000                |
-| FastAPI docs  | http://localhost:8000/docs           |
-| Next.js       | http://localhost:3000                |
-| pgAdmin       | http://localhost:5050 (admin@copilot.local / admin) |
-| Postgres      | localhost:5432 (copilot / copilot_dev_password)     |
-
-## Next steps to go live
-
-1. **Audio capture** — wire `chrome.tabCapture` + an `AudioWorklet` PCM16
-   downsampler in `apps/extension/src/offscreen/offscreen.ts` (TODO is marked
-   inline).
-2. **Deepgram** — fill in `DEEPGRAM_API_KEY` and replace `_FakeStream` with the
-   real `DeepgramClient.listen.asynclive` call in
-   `apps/api/app/services/deepgram.py`.
-3. **GitHub Models** — fill in `GITHUB_MODELS_TOKEN` and implement the
-   `chat/completions` POST in `apps/api/app/services/github_models.py`. Hook
-   the result into `routers/live_stream.py` so hints get persisted and
-   dispatched.
-4. **Final report** — replace the placeholder write in
-   `apps/api/app/routers/evaluate.py` with a real GitHub Models call that
-   summarizes the saved transcript history.
-
-## Useful scripts
+### 4️⃣ Build & load the Chrome extension
 
 ```bash
-pnpm typecheck            # tsc --noEmit across all workspace packages
-pnpm build                # production build for all JS packages
-pnpm docker:up            # docker compose up -d
-pnpm docker:down          # docker compose down
-pnpm docker:reset         # destroy volumes + rebuild
-pnpm docker:logs          # follow API logs
+pnpm install
+pnpm dev:ext              # builds into apps/extension/dist (watch mode)
 ```
+
+Then in Chrome:
+
+1. Open `chrome://extensions` and turn on **Developer mode**.
+2. Click **Load unpacked** and select the `apps/extension/dist` folder.
+3. Open your meeting tab, click the extension's toolbar icon, fill in the session details, and hit **Start**.
+
+> 💡 **Tip:** `./copilot bootup` brings up the *entire* stack **and** the extension watcher in a single command.
+
+---
+
+## 🏗️ How it works
+
+```mermaid
+flowchart LR
+    subgraph Chrome["🧩 Chrome Extension (MV3)"]
+        P2["Side panel<br/>session setup"]
+        P1["Offscreen audio capture<br/>tabCapture + mic"]
+    end
+    subgraph API["⚙️ FastAPI + PostgreSQL"]
+        P3["WebSocket router"]
+        P4["Deepgram streaming STT"]
+        P5["LLM evaluator<br/>GitHub Models → Gemini"]
+        P6["Live-feed dispatcher"]
+        DB[("PostgreSQL")]
+    end
+    subgraph Web["🖥️ Next.js Dashboard"]
+        P8["Live transcript + hints"]
+        P7["Past reports"]
+    end
+
+    P2 -->|POST /api/session| API
+    P1 -->|WS audio · /api/live-stream| P3 --> P4 --> P5
+    P5 --> P6 --> DB
+    P6 -->|WS · /api/live-feed| P8
+    DB --> P7
+```
+
+| Component | Stack | Path |
+|---|---|---|
+| Chrome extension | TypeScript, React, crxjs/Vite, MV3 | `apps/extension/` |
+| Backend API | FastAPI, SQLModel, Deepgram SDK, httpx | `apps/api/` |
+| Web dashboard | Next.js 15 (App Router), React 19, Tailwind | `apps/web/` |
+| Shared types | TypeScript | `packages/shared/` |
+| Infrastructure | Docker Compose (Postgres, pgAdmin) | `docker-compose.yml` |
+
+---
+
+## ⚙️ Configuration
+
+Everything is driven by `.env` (copy from `.env.example`):
+
+| Variable | Description |
+|---|---|
+| `DEEPGRAM_API_KEY` | Deepgram key for live transcription |
+| `GITHUB_MODELS_TOKEN` | GitHub PAT with the `models:read` scope |
+| `GITHUB_MODELS_NAME` | Primary model, e.g. `gpt-4o` or `gpt-4o-mini` |
+| `GEMINI_API_KEY` | Google AI Studio key (fallback provider) |
+| `GEMINI_MODEL` | e.g. `gemini-2.0-flash` |
+| `MODEL_PROVIDER_ORDER` | Failover order, e.g. `github,gemini` |
+| `DATABASE_URL` | Postgres DSN (the Docker default just works) |
+
+> [!WARNING]
+> Never commit real secrets. `.env` is gitignored; only `.env.example` is tracked. Change the default Postgres password before any real deployment.
+
+---
+
+## 🧰 The `copilot` CLI
+
+A single-word control panel for the dev stack — run `./copilot <command>`:
+
+| Command | What it does |
+|---|---|
+| `bootup` / `shutdown` | Start/stop the whole stack **and** the extension watcher |
+| `start` / `stop` / `restart` | Manage the Docker containers |
+| `rebuild` / `reset` | Rebuild images (⚠️ `reset` also wipes the database) |
+| `api` / `web` | Rebuild just one container |
+| `logs` / `errors` | Follow or filter service logs |
+| `db` / `pgadmin` | Open psql / pgAdmin |
+| `health` | Ping the API health endpoint |
+| `extract <file>` | Test resume/JD parsing on a local file |
+
+---
+
+## 🔌 Key API endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `POST` | `/api/session` | Create an interview session |
+| `POST` | `/api/documents/extract` | Parse an uploaded PDF/DOCX/TXT resume or JD |
+| `WS` | `/api/live-stream/{id}` | Inbound binary audio from the extension |
+| `WS` | `/api/live-feed/{id}` | Outbound transcript + hint events |
+| `POST` | `/api/evaluate` | Finalize the session into a report |
+| `GET` | `/api/reports` | List past reports |
+
+Explore them interactively at **http://localhost:8000/docs**.
+
+---
+
+## 🩺 Troubleshooting
+
+<details>
+<summary><strong>No transcription appears</strong></summary>
+
+Check `DEEPGRAM_API_KEY` and your mic permission. On macOS: **System Settings → Privacy & Security → Microphone → enable Chrome**, then fully quit and reopen Chrome.
+</details>
+
+<details>
+<summary><strong>Hints / answers are empty</strong></summary>
+
+Your LLM key is missing or rate-limited. GitHub Models' free tier is ~150 requests/model/day — add a `GEMINI_API_KEY` so the app fails over automatically.
+</details>
+
+<details>
+<summary><strong>The extension won't capture the tab</strong></summary>
+
+Chrome's internal pages (`chrome://`, the web store, etc.) can't be captured. Click the toolbar icon on a normal meeting tab.
+</details>
+
+<details>
+<summary><strong>Port already in use</strong></summary>
+
+Stop whatever is using ports 3000 / 8000 / 5432 / 5050, or change them in `docker-compose.yml`.
+</details>
+
+---
+
+## 🗺️ Roadmap
+
+- [ ] Publish the extension to the Chrome Web Store
+- [ ] Support more meeting platforms (Zoom web, Microsoft Teams)
+- [ ] Configurable API base URL (remove `localhost` hardcoding)
+- [ ] OCR fallback for scanned PDF resumes
+- [ ] Authentication + multi-user sessions
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! For significant changes, please open an issue first to discuss what you'd like to do.
+
+```bash
+pnpm install
+pnpm typecheck && pnpm lint          # JS / TS
+cd apps/api && ruff check && mypy .  # Python
+```
+
+---
+
+## 📜 License
+
+Released under the [MIT License](LICENSE) © robynsyngh.
+
+## 🙏 Acknowledgements
+
+[Deepgram](https://deepgram.com) · [GitHub Models](https://github.com/marketplace/models) · [Google Gemini](https://ai.google.dev) · [FastAPI](https://fastapi.tiangolo.com) · [Next.js](https://nextjs.org)
