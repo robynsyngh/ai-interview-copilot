@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+#
+# copilot — single-word control panel for the AI Interview Co-Pilot dev stack.
+#
+# Usage:  copilot <command>
+# Run    "copilot help"  to see everything.
+#
+set -euo pipefail
+
+# Always operate from the repo root (the dir this script lives in).
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+
+# --- pretty output -----------------------------------------------------------
+if [[ -t 1 ]]; then
+  BLUE=$'\033[34m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'; BOLD=$'\033[1m'; DIM=$'\033[2m'; RESET=$'\033[0m'
+else
+  BLUE=""; GREEN=""; YELLOW=""; RED=""; BOLD=""; DIM=""; RESET=""
+fi
+say()  { printf "%s\n" "${BLUE}▸${RESET} $*"; }
+ok()   { printf "%s\n" "${GREEN}✓${RESET} $*"; }
+warn() { printf "%s\n" "${YELLOW}!${RESET} $*"; }
+die()  { printf "%s\n" "${RED}✗ $*${RESET}" >&2; exit 1; }
+
+dc() { docker compose "$@"; }
+
+usage() {
+  cat <<EOF
+${BOLD}copilot${RESET} — control the AI Interview Co-Pilot dev stack
+
+${BOLD}Everything${RESET}
+  ${GREEN}bootup${RESET}       Bring up the WHOLE stack: Docker (db/pgadmin/api/web) + extension watcher
+  ${GREEN}shutdown${RESET}     Stop Docker (incl. web) AND the extension watcher started by bootup
+
+${BOLD}Stack / Docker${RESET}
+  ${GREEN}start${RESET}        Start all containers (postgres, pgadmin, api, web) in the background
+  ${GREEN}stop${RESET}         Stop all containers
+  ${GREEN}restart${RESET}      Restart all containers
+  ${GREEN}reset${RESET}        Rebuild from scratch (wipes DB volume, then rebuilds + starts)
+  ${GREEN}rebuild${RESET}      Rebuild images and start (keeps the DB volume)
+  ${GREEN}status${RESET}       Show container status (ps)
+
+${BOLD}Logs / Debugging${RESET}
+  ${GREEN}logs${RESET}         Follow API logs (live)
+  ${GREEN}logs <svc>${RESET}   Follow logs for a service (api | web | postgres | pgadmin)
+  ${GREEN}errors${RESET}       Show only errors/warnings from recent logs
+  ${GREEN}console${RESET}      Alias for "errors"
+
+${BOLD}Database${RESET}
+  ${GREEN}db${RESET}           Open a psql shell into Postgres
+  ${GREEN}pgadmin${RESET}      Open pgAdmin in the browser (http://localhost:5050)
+
+${BOLD}App dev servers${RESET}
+  ${GREEN}web${RESET}          Rebuild & restart the web container (after frontend changes)
+  ${GREEN}api${RESET}          Rebuild & restart the api container (after backend/dependency changes)
+  ${GREEN}ext${RESET}          Run the Chrome extension dev build (pnpm dev:ext)
+
+${BOLD}Misc${RESET}
+  ${GREEN}health${RESET}       Curl the API health endpoint
+  ${GREEN}extract <file>${RESET}  Test resume/JD parsing: upload a PDF/DOCX/TXT to /api/documents/extract
+  ${GREEN}help${RESET}         Show this message
+
+${DIM}Examples:  copilot start   ·   copilot api   ·   copilot extract resume.pdf${RESET}
+EOF
+}
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+  bootup|boot|all)
+    LOG_DIR="$ROOT/.copilot-logs"
+    mkdir -p "$LOG_DIR"
+
+    say "Booting the full stack…"
+    dc up -d
+    ok "Docker is up (postgres, pgadmin, api, web)."
+
+    say "Starting extension (pnpm dev:ext) → logs: .copilot-logs/ext.log"
+    pnpm dev:ext >"$LOG_DIR/ext.log" 2>&1 &
+    EXT_PID=$!
+
+    # Ctrl-C stops the extension watcher only. Docker (incl. web) keeps running;
+    # use "copilot shutdown" / "copilot stop" to bring the containers down.
+    trap 'printf "\n"; warn "Stopping the extension watcher…"; kill "$EXT_PID" 2>/dev/null || true; ok "Extension watcher stopped. Docker (incl. web) is still up — run \"copilot stop\" to stop it."; exit 0' INT TERM
+
+    echo
+    ok "Everything is starting up:"
+    printf "    %sAPI%s      → http://localhost:8000\n" "$BOLD" "$RESET"
+    printf "    %sWeb%s      → http://localhost:3000\n" "$BOLD" "$RESET"
+    printf "    %spgAdmin%s  → http://localhost:5050\n" "$BOLD" "$RESET"
+    echo
+    say "Streaming extension build logs (Ctrl-C stops the watcher; web/api logs → \"copilot logs web\")…"
+    echo
+    tail -n +1 -f "$LOG_DIR/ext.log"
+    ;;
+
+  shutdown)
+    say "Stopping the extension watcher…"
+    pkill -f "dev:ext" 2>/dev/null && ok "Extension dev server stopped." || warn "No extension dev server running."
+    # Legacy: also stop a local web dev server if one lingers from an older bootup.
+    pkill -f "dev:web" 2>/dev/null && ok "Legacy local web server stopped." || true
+    say "Stopping Docker (postgres, pgadmin, api, web)…"
+    dc down
+    ok "Everything is down."
+    ;;
+
+  start|up)
+    say "Starting the stack…"
+    dc up -d
+    ok "Stack is up. Web → http://localhost:3000  ·  API → http://localhost:8000  ·  pgAdmin → http://localhost:5050"
+    ;;
+
+  stop|down)
+    say "Stopping the stack…"
+    dc down
+    ok "Stack stopped."
+    ;;
+
+  restart)
+    say "Restarting the stack…"
+    dc restart
+    ok "Stack restarted."
+    ;;
+
+  reset)
+    warn "This wipes the Postgres data volume."
+    say "Rebuilding from scratch…"
+    dc down -v
+    dc up -d --build
+    ok "Fresh stack is up."
+    ;;
+
+  rebuild)
+    say "Rebuilding images (keeping data)…"
+    dc up -d --build
+    ok "Rebuilt and running."
+    ;;
+
+  status|ps)
+    dc ps
+    ;;
+
+  logs)
+    svc="${1:-api}"
+    say "Following logs for '${svc}' (Ctrl-C to quit)…"
+    dc logs -f "$svc"
+    ;;
+
+  errors|console)
+    svc="${1:-api}"
+    say "Recent errors/warnings for '${svc}':"
+    dc logs --tail 500 "$svc" 2>&1 \
+      | grep -iE "error|exception|traceback|critical|warn|fail" \
+      || ok "No errors found in the last 500 lines."
+    ;;
+
+  db|psql)
+    say "Connecting to Postgres (\\q to exit)…"
+    dc exec postgres psql -U "${POSTGRES_USER:-copilot}" -d "${POSTGRES_DB:-copilot}"
+    ;;
+
+  pgadmin)
+    open "http://localhost:5050" 2>/dev/null || say "Open http://localhost:5050"
+    ;;
+
+  health)
+    say "Pinging API health…"
+    curl -fsS http://localhost:8000/health && echo || die "API not reachable on :8000"
+    ;;
+
+  web)
+    say "Rebuilding & restarting the web container…"
+    dc up -d --build web
+    ok "Web is up → http://localhost:3000"
+    ;;
+
+  api)
+    say "Rebuilding & restarting the api container…"
+    dc up -d --build api
+    ok "API is up → http://localhost:8000  ·  docs → http://localhost:8000/docs"
+    ;;
+
+  extract)
+    file="${1:-}"
+    [[ -n "$file" ]] || die "Usage: copilot extract <path-to-pdf|docx|txt>"
+    [[ -f "$file" ]] || die "File not found: $file"
+    say "Uploading '$file' → POST /api/documents/extract …"
+    curl -fsS -X POST http://localhost:8000/api/documents/extract \
+      -F "file=@${file}" \
+      || die "Extraction failed. Is the API running? Try \"copilot api\" then \"copilot health\"."
+    echo
+    ;;
+
+  help|-h|--help)
+    usage
+    ;;
+
+  *)
+    warn "Unknown command: ${cmd}"
+    usage
+    exit 1
+    ;;
+esac

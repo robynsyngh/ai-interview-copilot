@@ -1,0 +1,9 @@
+# Keep the (repo-root) build context small for the web image build.
+# Host node_modules/.next are platform-specific and must NOT leak into the
+# Linux image — they are reinstalled/rebuilt inside the container.
+**/node_modules
+**/.next
+**/dist
+.git
+*.log
+apps/extension/copilot-extension.zip

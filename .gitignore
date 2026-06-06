@@ -1,0 +1,56 @@
+# Node
+node_modules/
+.pnpm-store/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Env (real secrets never committed)
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+logs/
+.copilot-logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+
+# Docker
+postgres-data/
+pgadmin-data/
+
+# Chrome extension build artifacts
+apps/extension/dist/
+apps/extension/.crx/
+*.crx
+*.zip
+
+# Misc
+coverage/
+.cache/

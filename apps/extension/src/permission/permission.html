@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Enable microphone · AI Interview Co-Pilot</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        background: #0b1120;
+        color: #e2e8f0;
+        font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }
+      .card {
+        max-width: 560px;
+        width: 100%;
+        background: #111a2e;
+        border: 1px solid #1e293b;
+        border-radius: 12px;
+        padding: 28px;
+      }
+      h1 { font-size: 20px; margin: 0 0 8px; }
+      p { margin: 8px 0; color: #cbd5f5; }
+      #status { margin-top: 16px; font-weight: 600; }
+      ol { color: #94a3b8; font-size: 13px; padding-left: 20px; }
+      button {
+        margin-top: 16px;
+        height: 38px;
+        padding: 0 16px;
+        border: none;
+        border-radius: 8px;
+        background: #3b82f6;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Enable microphone access</h1>
+      <p>
+        This grants the AI Interview Co-Pilot extension permission to use your
+        microphone so it can transcribe <strong>your</strong> side of the
+        conversation (not just the other person).
+      </p>
+      <div id="status">Requesting microphone…</div>
+      <ol>
+        <li>If Chrome shows a permission prompt, click <strong>Allow</strong>.</li>
+        <li>
+          If it was blocked before, click the <strong>mic/camera icon</strong> in
+          the address bar above, choose <strong>Allow</strong>, then press Retry.
+        </li>
+        <li>Once it says enabled, close this tab and click <strong>Start interview</strong> in the side panel.</li>
+      </ol>
+      <button id="retry" style="display: none">Retry</button>
+    </div>
+    <script type="module" src="./permission.ts"></script>
+  </body>
+</html>

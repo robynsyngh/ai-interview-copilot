@@ -1,0 +1,25 @@
+{
+  "name": "ai-interview-copilot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI Interview Co-Pilot — Chrome Extension + Next.js + FastAPI + Postgres + Deepgram + GitHub Models",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev:web": "pnpm --filter @copilot/web dev",
+    "dev:ext": "pnpm --filter @copilot/extension dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r --parallel typecheck",
+    "lint": "pnpm -r --parallel lint",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f api",
+    "docker:reset": "docker compose down -v && docker compose up -d --build"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
