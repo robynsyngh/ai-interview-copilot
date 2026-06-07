@@ -35,8 +35,11 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "ASYNC", "S"]
-ignore = ["S101"]
+# N = pep8-naming: enforce snake_case functions/variables, PascalCase classes, etc.
+select = ["E", "F", "I", "B", "UP", "ASYNC", "S", "N"]
+# S101: allow asserts. B008: FastAPI's Depends()/Query() in defaults is idiomatic.
+# E501: long lines are fine here (prompt/question string literals are kept on one line).
+ignore = ["S101", "B008", "E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

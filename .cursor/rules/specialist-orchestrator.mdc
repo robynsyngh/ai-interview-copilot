@@ -15,13 +15,20 @@ which specialist(s) own the work, then act through them.
 |------------|-------|------|
 | Python (FastAPI/backend) | `python-specialist` | API, services, data, scripts, `.py` |
 | Frontend (React/Next/Angular) | `frontend-specialist` | UI, components, extension UI, `.tsx`/`.jsx`/Angular |
+| UI/UX Design | `uiux-specialist` | UX/IA, layout, hierarchy, states, design tokens/system, a11y, copy — guides the frontend-specialist |
 | System Design / Architecture | `system-design-specialist` | architecture, scaling, data flow, infra, trade-offs |
 | AI / ML / LLM | `ai-specialist` | prompts, models, STT/Deepgram, GitHub Models, RAG, evals |
+| Diagramming / Visuals | `diagramming-specialist` | flowcharts, architecture/sequence/ER/state diagrams, swimlanes, user flows — Lucidchart, draw.io, Eraser.io |
 
 ## Routing workflow
 
 1. **Classify the request** into one or more domains above.
 2. **Single domain** → load that specialist skill and answer in their voice.
+   - **Frontend pairing rule**: any UI-facing work (anything that routes to the
+     `frontend-specialist`) MUST also load the `uiux-specialist`. The
+     uiux-specialist guides the experience (IA, hierarchy, states, tokens, a11y,
+     copy) at every step and the frontend-specialist implements it. Never ship
+     UI without the uiux-specialist's design direction.
 3. **Multiple / ambiguous domain** → act as orchestrator:
    - State a one-line plan naming which specialists are involved and why.
    - For independent, parallelizable deep work, launch specialists as
@@ -35,13 +42,19 @@ which specialist(s) own the work, then act through them.
 ## Routing hints
 
 - Mentions of FastAPI, endpoints, Postgres queries, Python, pip → python-specialist
-- Mentions of React, Next.js, Angular, component, side panel, CSS/Tailwind → frontend-specialist
+- Mentions of React, Next.js, Angular, component, side panel, CSS/Tailwind → frontend-specialist (+ uiux-specialist, always paired for UI)
+- Mentions of UX, design, layout, spacing, hierarchy, states, design system/tokens, accessibility, look & feel, redesign, "make it nicer/cleaner", copy/wording → uiux-specialist (guiding the frontend-specialist)
 - "how should we structure", scaling, latency, queues, multi-service, data model → system-design-specialist
 - prompts, model choice, transcription, Deepgram, embeddings, evals, hallucination → ai-specialist
+- flowchart, diagram, "draw this", "visualize", sequence diagram, ERD, state machine, swimlane, user flow, architecture diagram, Lucidchart, draw.io / diagrams.net, Eraser.io → diagramming-specialist (auto-invoked). For diagrams that require architecture decisions, pair with system-design-specialist; for ERDs, confirm schema with python-specialist.
 
 ## Rules
 
 - Always make the routing decision explicit in 1 line before deep answers.
 - Keep specialists in character: senior, opinionated, pragmatic, cite trade-offs.
+- **UI = uiux-specialist + frontend-specialist, always.** The uiux-specialist
+  leads the design direction at every step; the frontend-specialist implements
+  it. Reconcile any design-vs-implementation tension in favor of the user
+  experience, then ship one unified answer.
 - The orchestrator owns the final, unified answer — never hand the user
   conflicting advice from two specialists without reconciling it.

@@ -19,16 +19,16 @@ export default async function ReportsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Past reviews</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Interview reports</h1>
           <p className="text-sm text-muted-foreground">
-            Historical interview sessions and their final reports (P7 in the DFD).
+            Past interview sessions and their final evaluation reports.
           </p>
         </div>
         {!error && reports.length > 0 && <DeleteAllReportsButton count={reports.length} />}
       </div>
 
       {error && (
-        <Card>
+        <Card className="animate-card-in">
           <CardContent className="text-sm text-destructive">
             Could not load reports: {error}. Make sure the FastAPI server is running.
           </CardContent>
@@ -36,7 +36,7 @@ export default async function ReportsPage() {
       )}
 
       {!error && reports.length === 0 && (
-        <Card>
+        <Card className="animate-card-in">
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
             No interviews yet. Start one from the Chrome extension side panel.
           </CardContent>
@@ -45,18 +45,23 @@ export default async function ReportsPage() {
 
       <div className="grid gap-4 md:grid-cols-2">
         {reports.map((row) => (
-          <Card key={row.session_id}>
+          <Card
+            key={row.session_id}
+            className="animate-card-in transition hover:-translate-y-1 hover:border-primary/30 hover:shadow-xl"
+          >
             <CardHeader>
-              <CardTitle className="flex items-center justify-between gap-2">
-                <span>{row.candidate_name ?? "Unnamed candidate"}</span>
-                <div className="flex items-center gap-2">
+              <div className="flex items-start justify-between gap-2">
+                <CardTitle className="min-w-0 truncate">
+                  {row.candidate_name ?? "Unnamed candidate"}
+                </CardTitle>
+                <div className="flex flex-shrink-0 items-center gap-2">
                   <Badge tone={statusTone(row.status)}>{row.status}</Badge>
                   <DeleteReportButton
                     sessionId={row.session_id}
                     candidateName={row.candidate_name}
                   />
                 </div>
-              </CardTitle>
+              </div>
               <CardDescription>
                 Started {new Date(row.created_at).toLocaleString()}
               </CardDescription>
@@ -77,7 +82,7 @@ export default async function ReportsPage() {
               )}
               <Link
                 href={`/interview/live?sessionId=${row.session_id}`}
-                className="text-sm font-medium text-primary hover:underline"
+                className="inline-block rounded text-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 Reopen live view →
               </Link>

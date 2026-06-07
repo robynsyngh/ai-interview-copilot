@@ -33,7 +33,7 @@ export function TranscriptPane({ segments }: Props) {
   }, [segments]);
 
   return (
-    <Card className="flex h-full flex-col">
+    <Card className="animate-card-in flex h-full flex-col">
       <CardHeader>
         <CardTitle>Live transcript</CardTitle>
       </CardHeader>
@@ -46,7 +46,7 @@ export function TranscriptPane({ segments }: Props) {
           ) : (
             <div className="space-y-4">
               {livePartial && (
-                <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+                <div className="animate-card-in rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
                   <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-primary">
                     Hearing now
                   </div>
@@ -66,7 +66,7 @@ export function TranscriptPane({ segments }: Props) {
                     <li
                       key={segment.id}
                       className={cn(
-                        "rounded-md px-3 py-2 text-sm leading-relaxed",
+                        "animate-card-in rounded-md px-3 py-2 text-sm leading-relaxed transition hover:-translate-y-0.5 hover:shadow-lg",
                         segment.speaker === "candidate" && "bg-primary/5",
                         segment.speaker === "interviewer" && "bg-accent",
                         segment.speaker === "unknown" && "bg-muted",

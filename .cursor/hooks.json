@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": ".cursor/hooks/commit-guard.sh",
+        "matcher": "git\\s+commit",
+        "timeout": 180
+      }
+    ]
+  }
+}

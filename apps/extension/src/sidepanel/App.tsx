@@ -11,7 +11,7 @@
  * later consume from the background's `tabCapture.getMediaStreamId` call.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   CreateSessionRequest,
   CreateSessionResponse,
@@ -56,7 +56,15 @@ async function extractDocumentText(file: File): Promise<string> {
   return data.text;
 }
 
-type Status = "idle" | "starting" | "live" | "stopped" | "error";
+type Status = "idle" | "starting" | "live" | "stopping" | "stopped" | "error";
+type ToastTone = "success" | "error" | "info";
+
+interface ToastMessage {
+  id: string;
+  tone: ToastTone;
+  title: string;
+  description?: string;
+}
 
 interface TargetTab {
   id: number | null;
@@ -140,6 +148,16 @@ export function App() {
   const [micGranted, setMicGranted] = useState<boolean | null>(null);
   const [micError, setMicError] = useState<string | null>(null);
   const [level, setLevel] = useState(0);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [stopping, setStopping] = useState(false);
+
+  const notify = useCallback((toast: Omit<ToastMessage, "id">) => {
+    const id = crypto.randomUUID();
+    setToasts((current) => [{ id, ...toast }, ...current].slice(0, 3));
+    window.setTimeout(() => {
+      setToasts((current) => current.filter((item) => item.id !== id));
+    }, 4200);
+  }, []);
 
   useEffect(() => {
     const onMessage = (message: RuntimeMessage) => {
@@ -155,17 +173,23 @@ export function App() {
         // A missing-mic warning is non-fatal: the session still runs tab-only.
         if (/Microphone unavailable/i.test(message.message)) {
           setHint(message.message);
+          notify({
+            tone: "info",
+            title: "Session running without microphone",
+            description: message.message,
+          });
           return;
         }
         setError(`Audio capture failed: ${message.message}`);
         setHint("Check the service worker/offscreen console for the underlying Chrome or WebSocket error.");
         setStatus("error");
+        notify({ tone: "error", title: "Audio capture failed", description: message.message });
       }
     };
 
     chrome.runtime.onMessage.addListener(onMessage);
     return () => chrome.runtime.onMessage.removeListener(onMessage);
-  }, []);
+  }, [notify]);
 
   useEffect(() => {
     let cancelled = false;
@@ -207,15 +231,18 @@ export function App() {
   }, [target?.id]);
 
   const classification = target ? classifyTab(target.url) : { capturable: false };
+  const sessionLocked = status === "starting" || status === "live" || status === "stopping";
   const canStart =
     !!target?.id &&
     classification.capturable &&
     jobDescription.trim().length > 0 &&
     resumeText.trim().length > 0 &&
-    status !== "starting" &&
-    status !== "live";
+    !sessionLocked;
+  const startDisabled = !canStart;
+  const stopDisabled = status !== "live" || stopping;
 
   const startSession = async () => {
+    if (!canStart) return;
     setStatus("starting");
     setError(null);
     setHint(null);
@@ -280,9 +307,16 @@ export function App() {
         url: `${WEB_BASE}/interview/live?sessionId=${session.session_id}`,
       });
       setStatus("live");
+      notify({
+        tone: "success",
+        title: "Interview started",
+        description: "The live dashboard opened in a new tab.",
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
       setStatus("error");
+      notify({ tone: "error", title: "Could not start interview", description: message });
     }
   };
 
@@ -291,22 +325,52 @@ export function App() {
     // origin - the side panel itself can't surface the prompt or the
     // address-bar mic control needed to un-block a denied permission.
     void chrome.tabs.create({ url: chrome.runtime.getURL("src/permission/permission.html") });
+    notify({
+      tone: "info",
+      title: "Microphone permission opened",
+      description: "Grant access in the new extension tab, then retry Start.",
+    });
   };
 
   const stopSession = async () => {
+    if (stopDisabled) return;
+    setStopping(true);
+    setStatus("stopping");
+    setError(null);
     try {
-      await chrome.runtime.sendMessage({ kind: "session.stop" } satisfies RuntimeMessage);
-    } finally {
+      const ack = await chrome.runtime.sendMessage({ kind: "session.stop" } satisfies RuntimeMessage);
+      if (!ack?.ok) {
+        throw new Error(ack?.error ?? "background did not ack stop");
+      }
+      notify({ tone: "success", title: "Interview stopped" });
       setStatus("stopped");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      setStatus("live");
+      notify({ tone: "error", title: "Could not stop interview", description: message });
+    } finally {
+      setStopping(false);
     }
   };
 
   return (
     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, height: "100%" }}>
+      <style>
+        {`
+          @keyframes copilot-spin {
+            to { transform: rotate(360deg); }
+          }
+          @keyframes copilot-toast-in {
+            from { opacity: 0; transform: translateY(-6px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+        `}
+      </style>
       <header>
         <h1 style={{ fontSize: 18, margin: 0 }}>AI Interview Co-Pilot</h1>
-        <p style={{ margin: "4px 0 0", color: "#94a3b8", fontSize: 12 }}>
-          Status: <strong>{status}</strong>
+        <p style={{ margin: "6px 0 0", color: "#94a3b8", fontSize: 12 }}>
+          Status: <StatusPill status={status} />
           {sessionId && <span> · session {sessionId.slice(0, 8)}…</span>}
         </p>
       </header>
@@ -318,15 +382,21 @@ export function App() {
         <div style={{ display: "flex", gap: 6 }}>
           <ModeButton
             active={mode === "interviewer"}
-            disabled={status === "live" || status === "starting"}
-            onClick={() => setMode("interviewer")}
+            disabled={sessionLocked}
+            onClick={() => {
+              setMode("interviewer");
+              notify({ tone: "success", title: "Mode set to interviewer" });
+            }}
             label="Interviewer"
             hint="Get rubrics to evaluate the candidate"
           />
           <ModeButton
             active={mode === "interviewee"}
-            disabled={status === "live" || status === "starting"}
-            onClick={() => setMode("interviewee")}
+            disabled={sessionLocked}
+            onClick={() => {
+              setMode("interviewee");
+              notify({ tone: "success", title: "Mode set to interviewee" });
+            }}
             label="Interviewee"
             hint="Get the exact answer to say"
           />
@@ -379,10 +449,11 @@ export function App() {
       <label style={labelStyle}>
         Candidate name (optional)
         <input
-          style={inputStyle}
+          style={fieldStyle(sessionLocked)}
           value={candidateName}
           onChange={(event) => setCandidateName(event.target.value)}
           placeholder="Jane Doe"
+          disabled={sessionLocked}
         />
       </label>
 
@@ -392,7 +463,8 @@ export function App() {
         onChange={setJobDescription}
         placeholder="Paste the JD…"
         minHeight={90}
-        disabled={status === "live" || status === "starting"}
+        disabled={sessionLocked}
+        onNotify={notify}
       />
 
       <DropTextarea
@@ -401,7 +473,8 @@ export function App() {
         onChange={setResumeText}
         placeholder="Paste the resume contents…"
         minHeight={120}
-        disabled={status === "live" || status === "starting"}
+        disabled={sessionLocked}
+        onNotify={notify}
       />
 
       {error && (
@@ -423,14 +496,131 @@ export function App() {
         </div>
       )}
 
+      <div style={sessionHintStyle(status, startDisabled)}>
+        {sessionActionHint(status, target, classification, jobDescription, resumeText)}
+      </div>
+
       <div style={{ display: "flex", gap: 8, marginTop: "auto" }}>
-        <button onClick={startSession} disabled={!canStart} style={primaryButtonStyle}>
-          {status === "starting" ? "Starting…" : "Start interview"}
+        <button
+          onClick={() => void startSession()}
+          disabled={startDisabled}
+          style={actionButtonStyle("primary", startDisabled)}
+          title={startDisabled ? startDisabledReason(target, classification, jobDescription, resumeText, status) : "Start interview"}
+        >
+          <ButtonContent loading={status === "starting"}>
+            {status === "starting" ? "Starting…" : "Start interview"}
+          </ButtonContent>
         </button>
-        <button onClick={stopSession} disabled={status !== "live"} style={secondaryButtonStyle}>
-          Stop
+        <button
+          onClick={() => void stopSession()}
+          disabled={stopDisabled}
+          style={actionButtonStyle("secondary", stopDisabled)}
+          title={stopDisabled ? "Stop is available only while an interview is live." : "Stop interview"}
+        >
+          <ButtonContent loading={stopping || status === "stopping"}>
+            {stopping || status === "stopping" ? "Stopping…" : "Stop"}
+          </ButtonContent>
         </button>
       </div>
+      <ToastStack
+        toasts={toasts}
+        onDismiss={(id) => setToasts((current) => current.filter((item) => item.id !== id))}
+      />
+    </div>
+  );
+}
+
+function ButtonContent({ loading, children }: { loading: boolean; children: React.ReactNode }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+      {loading && <Spinner />}
+      {children}
+    </span>
+  );
+}
+
+function Spinner() {
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 12,
+        height: 12,
+        borderRadius: 999,
+        border: "2px solid currentColor",
+        borderTopColor: "transparent",
+        display: "inline-block",
+        animation: "copilot-spin 700ms linear infinite",
+      }}
+    />
+  );
+}
+
+function ToastStack({
+  toasts,
+  onDismiss,
+}: {
+  toasts: ToastMessage[];
+  onDismiss: (id: string) => void;
+}) {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: 10,
+        right: 10,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        zIndex: 10,
+        width: 300,
+      }}
+    >
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          role="status"
+          style={{
+            padding: "10px 12px",
+            borderRadius: 8,
+            border: `1px solid ${toast.tone === "error" ? "#7f1d1d" : toast.tone === "success" ? "#14532d" : "#1d4ed8"}`,
+            background:
+              toast.tone === "error"
+                ? "rgba(127,29,29,0.9)"
+                : toast.tone === "success"
+                  ? "rgba(20,83,45,0.9)"
+                  : "rgba(30,64,175,0.9)",
+            color: "#f8fafc",
+            boxShadow: "0 12px 30px rgba(0,0,0,0.35)",
+            animation: "copilot-toast-in 160ms ease-out",
+          }}
+        >
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700 }}>{toast.title}</div>
+              {toast.description && (
+                <div style={{ marginTop: 3, fontSize: 11, color: "#cbd5e1", lineHeight: 1.35 }}>
+                  {toast.description}
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => onDismiss(toast.id)}
+              style={{
+                border: "none",
+                background: "transparent",
+                color: "#cbd5e1",
+                cursor: "pointer",
+                padding: 0,
+              }}
+              aria-label="Dismiss notification"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -447,6 +637,7 @@ function DropTextarea({
   placeholder,
   minHeight,
   disabled,
+  onNotify,
 }: {
   label: string;
   value: string;
@@ -454,6 +645,7 @@ function DropTextarea({
   placeholder: string;
   minHeight: number;
   disabled: boolean;
+  onNotify: (toast: Omit<ToastMessage, "id">) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -469,9 +661,16 @@ function DropTextarea({
       const text = await extractDocumentText(file);
       onChange(text);
       setFileName(file.name);
+      onNotify({
+        tone: "success",
+        title: "Document loaded",
+        description: `${file.name} was parsed into the text field.`,
+      });
     } catch (err) {
-      setDocError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setDocError(message);
       setFileName(null);
+      onNotify({ tone: "error", title: "Could not read document", description: message });
     } finally {
       setParsing(false);
     }
@@ -495,12 +694,12 @@ function DropTextarea({
             background: "none",
             border: "none",
             padding: 0,
-            color: disabled ? "#475569" : "#60a5fa",
+            color: disabled || parsing ? "#64748b" : "#60a5fa",
             fontSize: 11,
             cursor: disabled || parsing ? "default" : "pointer",
           }}
         >
-          {parsing ? "Reading…" : "Upload file"}
+          <ButtonContent loading={parsing}>{parsing ? "Reading…" : "Upload file"}</ButtonContent>
         </button>
       </div>
 
@@ -517,7 +716,7 @@ function DropTextarea({
 
       <textarea
         style={{
-          ...inputStyle,
+          ...fieldStyle(disabled || parsing),
           minHeight,
           resize: "vertical",
           border: dragOver ? "1px solid #3b82f6" : inputStyle.border,
@@ -542,6 +741,35 @@ function DropTextarea({
       )}
       {docError && <span style={{ fontSize: 10, color: "#fca5a5" }}>{docError}</span>}
     </div>
+  );
+}
+
+function StatusPill({ status }: { status: Status }) {
+  const tone =
+    status === "live"
+      ? { bg: "rgba(16,185,129,0.15)", color: "#86efac", border: "#14532d" }
+      : status === "starting" || status === "stopping"
+        ? { bg: "rgba(250,204,21,0.13)", color: "#fde68a", border: "#854d0e" }
+        : status === "error"
+          ? { bg: "rgba(248,113,113,0.14)", color: "#fca5a5", border: "#7f1d1d" }
+          : { bg: "rgba(51,65,85,0.65)", color: "#cbd5e1", border: "#334155" };
+  return (
+    <strong
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        border: `1px solid ${tone.border}`,
+        borderRadius: 999,
+        background: tone.bg,
+        color: tone.color,
+        padding: "2px 7px",
+        fontSize: 11,
+        lineHeight: 1.3,
+        textTransform: "capitalize",
+      }}
+    >
+      {status}
+    </strong>
   );
 }
 
@@ -738,23 +966,78 @@ const inputStyle: React.CSSProperties = {
   fontSize: 13,
 };
 
-const primaryButtonStyle: React.CSSProperties = {
-  flex: 1,
-  height: 36,
-  border: "none",
-  borderRadius: 6,
-  background: "#3b82f6",
-  color: "white",
-  fontWeight: 600,
-  cursor: "pointer",
-};
+function fieldStyle(disabled: boolean): React.CSSProperties {
+  return {
+    ...inputStyle,
+    opacity: disabled ? 0.6 : 1,
+    cursor: disabled ? "not-allowed" : "text",
+  };
+}
 
-const secondaryButtonStyle: React.CSSProperties = {
-  flex: 1,
-  height: 36,
-  border: "1px solid #334155",
-  borderRadius: 6,
-  background: "transparent",
-  color: "#e2e8f0",
-  cursor: "pointer",
-};
+function actionButtonStyle(variant: "primary" | "secondary", disabled: boolean): React.CSSProperties {
+  const primary = variant === "primary";
+  return {
+    flex: 1,
+    height: 36,
+    border: primary ? "none" : "1px solid #334155",
+    borderRadius: 6,
+    background: disabled
+      ? primary
+        ? "#1e3a8a"
+        : "rgba(15,23,42,0.7)"
+      : primary
+        ? "#3b82f6"
+        : "transparent",
+    color: disabled ? "#94a3b8" : primary ? "white" : "#e2e8f0",
+    fontWeight: primary ? 600 : 500,
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.55 : 1,
+    boxShadow: disabled || !primary ? "none" : "0 8px 18px rgba(59,130,246,0.28)",
+    transition: "background 140ms ease, opacity 140ms ease, transform 140ms ease",
+  };
+}
+
+function startDisabledReason(
+  target: TargetTab | null,
+  classification: { capturable: boolean; reason?: string },
+  jobDescription: string,
+  resumeText: string,
+  status: Status,
+): string {
+  if (status === "starting") return "Interview is starting.";
+  if (status === "live") return "Interview is already live. Stop it before starting another.";
+  if (status === "stopping") return "Interview is stopping.";
+  if (!target?.id) return "Click the extension icon on the meeting tab first.";
+  if (!classification.capturable) return classification.reason ?? "This tab cannot be captured.";
+  if (!jobDescription.trim()) return "Paste the job description before starting.";
+  if (!resumeText.trim()) return "Paste the candidate resume before starting.";
+  return "Start interview";
+}
+
+function sessionActionHint(
+  status: Status,
+  target: TargetTab | null,
+  classification: { capturable: boolean; reason?: string },
+  jobDescription: string,
+  resumeText: string,
+): string {
+  if (status === "starting") return "Starting capture. Keep this panel open until the live dashboard launches.";
+  if (status === "live") return "Interview is live. Start is locked; use Stop when the session is finished.";
+  if (status === "stopping") return "Stopping capture and releasing the tab audio stream.";
+  if (status === "stopped") return "Interview stopped. You can start a fresh session when ready.";
+  if (status === "error") return "Fix the error above, then retry Start.";
+  return startDisabledReason(target, classification, jobDescription, resumeText, status);
+}
+
+function sessionHintStyle(status: Status, blocked: boolean): React.CSSProperties {
+  const active = status === "live" || status === "starting" || status === "stopping";
+  return {
+    border: `1px solid ${active ? "#1d4ed8" : blocked ? "#334155" : "#14532d"}`,
+    borderRadius: 8,
+    background: active ? "rgba(59,130,246,0.08)" : blocked ? "rgba(15,23,42,0.65)" : "rgba(16,185,129,0.08)",
+    color: active ? "#bfdbfe" : blocked ? "#94a3b8" : "#86efac",
+    fontSize: 11,
+    lineHeight: 1.45,
+    padding: "8px 10px",
+  };
+}

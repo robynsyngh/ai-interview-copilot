@@ -9,6 +9,8 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
+    "hooks:install": "git config core.hooksPath .githooks && echo \"git hooks installed (core.hooksPath=.githooks)\"",
     "dev:web": "pnpm --filter @copilot/web dev",
     "dev:ext": "pnpm --filter @copilot/extension dev",
     "build": "pnpm -r build",

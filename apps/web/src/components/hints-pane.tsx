@@ -5,6 +5,7 @@ import type { AIHint } from "@copilot/shared";
 import { Lightbulb, AlertTriangle, Sparkles, MessagesSquare, TrendingUp } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/components/ui/toast";
 
 interface Props {
   hints: AIHint[];
@@ -51,7 +52,7 @@ export function AssistPane({ hints, mode }: Props) {
   const primaryItems = mode === "interviewee" ? answers : rubrics;
 
   return (
-    <Card className="flex h-full flex-col">
+    <Card className="animate-card-in flex h-full flex-col">
       <CardHeader>
         <CardTitle>
           {mode === "interviewer" ? "AI assist & follow-ups" : "Your answers & follow-ups"}
@@ -160,13 +161,25 @@ export function QuestionBankPane({ hints, mode }: Props) {
   );
   const sections = useMemo(() => groupBySection(questionBank), [questionBank]);
   const [askedIds, setAskedIds] = useState<Set<string>>(new Set());
+  const { toast } = useToast();
 
   const toggleAsked = (id: string) => {
+    const markedAsked = !askedIds.has(id);
     setAskedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
       return next;
+    });
+    toast({
+      title: markedAsked ? "Question marked asked" : "Question marked not asked",
+      description: markedAsked
+        ? "Progress updated in the question bank."
+        : "Question is back in the queue.",
+      tone: "success",
     });
   };
 
@@ -174,7 +187,7 @@ export function QuestionBankPane({ hints, mode }: Props) {
   const askedCount = questionBank.reduce((n, hint) => n + (askedIds.has(hint.id) ? 1 : 0), 0);
 
   return (
-    <Card className="flex h-full flex-col">
+    <Card className="animate-card-in flex h-full flex-col">
       <CardHeader className="flex-row items-center justify-between gap-2 space-y-0">
         <CardTitle>
           {mode === "interviewer" ? "Question Bank (JD + Resume)" : "Practice Question Bank"}
@@ -218,7 +231,7 @@ function SectionBlock({
 }) {
   const asked = section.items.reduce((n, hint) => n + (askedIds.has(hint.id) ? 1 : 0), 0);
   return (
-    <details open className="group rounded-md border bg-card/30">
+    <details open className="group animate-card-in rounded-md border bg-card/30 transition hover:border-primary/30">
       <summary className="flex cursor-pointer select-none items-center justify-between gap-2 px-3 py-2">
         <span className="flex items-center gap-2">
           <Badge tone={categoryTone(section.name)}>{section.name}</Badge>
@@ -294,7 +307,11 @@ function QuestionBankItem({
   const parsed = parseQuestionBankHint(hint.content);
   if (!parsed) return null;
   return (
-    <li className={`flex gap-3 rounded-md border bg-card/50 p-3 text-sm ${asked ? "opacity-60" : ""}`}>
+    <li
+      className={`animate-card-in flex gap-3 rounded-md border bg-card/50 p-3 text-sm transition hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-lg ${
+        asked ? "opacity-60" : ""
+      }`}
+    >
       <MessagesSquare className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden />
       <div className="flex-1 space-y-2">
         <div className="flex flex-wrap items-center gap-2">
@@ -304,7 +321,7 @@ function QuestionBankItem({
         <button
           type="button"
           onClick={() => onToggleAsked(hint.id)}
-          className="text-xs font-medium text-primary hover:underline"
+          className="text-xs font-medium text-primary transition hover:underline"
         >
           {asked ? "Mark not asked" : "Mark asked"}
         </button>
@@ -326,7 +343,7 @@ function RubricItem({
   if (!rubric) return null;
   return (
     <li
-      className={`space-y-2 rounded-md border p-3 text-sm ${
+      className={`animate-card-in space-y-2 rounded-md border p-3 text-sm transition hover:-translate-y-0.5 hover:shadow-lg ${
         current ? "border-primary/40 bg-primary/5 ring-1 ring-primary/20" : "border-primary/20 bg-primary/[0.03]"
       }`}
     >
@@ -348,7 +365,7 @@ function AnswerItem({ hint, current = false }: { hint: AIHint; current?: boolean
   if (!answer) return null;
   return (
     <li
-      className={`space-y-2 rounded-md border p-3 text-sm ${
+      className={`animate-card-in space-y-2 rounded-md border p-3 text-sm transition hover:-translate-y-0.5 hover:shadow-lg ${
         current
           ? "border-emerald-500/50 bg-emerald-500/10 ring-1 ring-emerald-500/25"
           : "border-emerald-500/25 bg-emerald-500/[0.03]"
@@ -378,7 +395,7 @@ function AnswerItem({ hint, current = false }: { hint: AIHint; current?: boolean
 function RuntimeHintItem({ hint }: { hint: AIHint }) {
   const Icon = ICON_BY_KIND[hint.kind] ?? Lightbulb;
   return (
-    <li className="flex gap-3 rounded-md border bg-card/50 p-3 text-sm">
+    <li className="animate-card-in flex gap-3 rounded-md border bg-card/50 p-3 text-sm transition hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-lg">
       <Icon className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden />
       <div className="space-y-1">
         <Badge tone={TONE_BY_KIND[hint.kind] ?? "default"}>

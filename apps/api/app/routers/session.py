@@ -13,7 +13,7 @@ from sqlmodel import Session, select
 from app.db import get_session
 from app.models.hint import AIHint, HintKind
 from app.models.session import InterviewSession, SessionStatus
-from app.models.transcript import TranscriptSegment
+from app.models.transcript import Speaker, TranscriptSegment
 from app.schemas.messages import (
     AskQuestionRequest,
     CreateSessionRequest,
@@ -133,6 +133,25 @@ async def ask_question(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
 
     mode = record.mode if record.mode in ("interviewer", "interviewee") else "interviewer"
+    question_text = payload.question.strip()
+    if not question_text:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="question is required"
+        )
+
+    question_segment = TranscriptSegment(
+        session_id=session_id,
+        speaker=Speaker.INTERVIEWER,
+        text=question_text,
+        is_final=True,
+    )
+    db.add(question_segment)
+    db.commit()
+    db.refresh(question_segment)
+    await dispatcher.broadcast(
+        session_id,
+        {"type": "transcript.final", "segment": _serialize_segment(question_segment)},
+    )
 
     recent_segments = db.exec(
         select(TranscriptSegment)
@@ -151,7 +170,7 @@ async def ask_question(
         if mode == "interviewee":
             proposal = await evaluator.answer_as_candidate(
                 session_id=session_id,
-                question=payload.question,
+                question=question_text,
                 recent_transcript=recent_transcript,
                 job_description=record.job_description,
                 resume_text=record.resume_text,
@@ -159,7 +178,7 @@ async def ask_question(
         else:
             proposal = await evaluator.answer_rubric(
                 session_id=session_id,
-                question=payload.question,
+                question=question_text,
                 recent_transcript=recent_transcript,
                 job_description=record.job_description,
                 resume_text=record.resume_text,
@@ -185,7 +204,20 @@ async def ask_question(
 
     hint_payload = _serialize_hint(hint)
     await dispatcher.broadcast(session_id, {"type": "hint", "hint": hint_payload})
-    return {"hint": hint_payload}
+    return {"hint": hint_payload, "segment": _serialize_segment(question_segment)}
+
+
+def _serialize_segment(segment: TranscriptSegment) -> dict[str, Any]:
+    return {
+        "id": str(segment.id),
+        "session_id": str(segment.session_id),
+        "speaker": segment.speaker.value,
+        "text": segment.text,
+        "start_ms": segment.start_ms,
+        "end_ms": segment.end_ms,
+        "is_final": segment.is_final,
+        "created_at": segment.created_at.isoformat(),
+    }
 
 
 async def _generate_practice_questions(resume_text: str, job_description: str) -> list[str]:
@@ -252,7 +284,10 @@ def _estimate_experience_level(resume_text: str) -> str:
     years = [int(match) for match in re.findall(r"(\d{1,2})\s*\+?\s*years?", text)]
     max_years = max(years) if years else 0
 
-    if re.search(r"\b(senior|lead|principal|staff|architect|head of|manager)\b", text) or max_years >= 6:
+    if (
+        re.search(r"\b(senior|lead|principal|staff|architect|head of|manager)\b", text)
+        or max_years >= 6
+    ):
         return "senior"
     if re.search(r"\b(intern|fresher|trainee|graduate|entry[- ]level)\b", text) or (
         0 < max_years <= 1
@@ -291,7 +326,9 @@ def _resume_starter_questions(resume_text: str, job_description: str) -> list[st
             f"[Medium] [Experience] Ask: You mention {company_name}. What problem did you work on there, and what measurable result did you deliver?"
         )
 
-    if re.search(r"\bcollege|university|degree|bachelor|master|b\.?tech|m\.?tech\b", resume, re.IGNORECASE):
+    if re.search(
+        r"\bcollege|university|degree|bachelor|master|b\.?tech|m\.?tech\b", resume, re.IGNORECASE
+    ):
         questions.append(
             "[Easy] [Education] Ask: Which course, lab, or academic project best prepared you for this role, and why?"
         )
@@ -301,7 +338,9 @@ def _resume_starter_questions(resume_text: str, job_description: str) -> list[st
             "[Medium] [Achievement] Ask: Which achievement on your resume are you most proud of, and what did you personally do to earn it?"
         )
 
-    if re.search(r"\bproject|built|developed|implemented|system|application\b", resume, re.IGNORECASE):
+    if re.search(
+        r"\bproject|built|developed|implemented|system|application\b", resume, re.IGNORECASE
+    ):
         questions.append(
             "[Hard] [Project depth] Ask: Pick one technical project from your resume and explain the architecture, trade-offs, and what you would improve now."
         )
@@ -387,7 +426,10 @@ def _extract_skills(text: str) -> list[str]:
     for skill in known_skills:
         tokens = aliases.get(skill, [skill.lower()])
         # Word-boundary check avoids "sql" matching inside "postgresql" twice, etc.
-        if any(re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", normalized) for token in tokens):
+        if any(
+            re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", normalized)
+            for token in tokens
+        ):
             found.append(skill)
     return _dedupe(found)
 
@@ -398,7 +440,11 @@ def _extract_named_phrases(text: str) -> list[str]:
         line = line.strip(" -•\t")
         if not line:
             continue
-        if not re.search(r"\b(company|pvt|ltd|llc|inc|corp|technologies|systems|solutions)\b", line, re.IGNORECASE):
+        if not re.search(
+            r"\b(company|pvt|ltd|llc|inc|corp|technologies|systems|solutions)\b",
+            line,
+            re.IGNORECASE,
+        ):
             continue
         cleaned = re.sub(r"\b(?:19|20)\d{2}\b", "", line)
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" -–—,")

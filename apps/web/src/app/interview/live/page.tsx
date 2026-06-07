@@ -10,6 +10,8 @@ import { connectLiveFeed } from "@/lib/ws";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
 
 type AssistMode = "interviewer" | "interviewee";
 
@@ -30,6 +32,9 @@ function LiveDashboardInner() {
   const [status, setStatus] = useState<string>("idle");
   const [error, setError] = useState<string | null>(null);
   const [assistMode, setAssistMode] = useState<AssistMode>("interviewer");
+  const [modeSaving, setModeSaving] = useState<AssistMode | null>(null);
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!sessionId) return;
@@ -47,12 +52,26 @@ function LiveDashboardInner() {
     };
   }, [sessionId]);
 
-  const changeMode = (mode: AssistMode) => {
+  const changeMode = async (mode: AssistMode) => {
+    if (!sessionId || modeSaving || mode === assistMode) return;
+    const previous = assistMode;
     setAssistMode(mode);
-    if (sessionId) {
-      void api.setMode(sessionId, mode).catch(() => {
-        /* keep optimistic UI; backend will retry on next toggle */
+    setModeSaving(mode);
+    setError(null);
+    try {
+      await api.setMode(sessionId, mode);
+      toast({
+        title: "Assist mode updated",
+        description: `Switched to ${mode === "interviewer" ? "interviewer rubric" : "interviewee answer"} mode.`,
+        tone: "success",
       });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setAssistMode(previous);
+      setError(message);
+      toast({ title: "Could not update mode", description: message, tone: "error" });
+    } finally {
+      setModeSaving(null);
     }
   };
 
@@ -74,7 +93,7 @@ function LiveDashboardInner() {
           setSegments((prev) => mergeSegment(prev, typed.segment));
           break;
         case "hint":
-          setHints((prev) => [typed.hint, ...prev].slice(0, 50));
+          setHints((prev) => mergeHint(prev, typed.hint));
           break;
         case "session.status":
           setError(null);
@@ -93,7 +112,7 @@ function LiveDashboardInner() {
     };
     ws.onclose = () => {
       if (!active) return;
-      setStatus("disconnected");
+      setStatus((prev) => (prev === "completed" || prev === "finalized" ? prev : "disconnected"));
     };
     ws.onerror = () => {
       if (!active) return;
@@ -107,18 +126,33 @@ function LiveDashboardInner() {
   }, [sessionId]);
 
   const tone = useMemo(() => {
-    if (status === "active" || status === "connected") return "success" as const;
+    if (status === "active" || status === "connected" || status === "completed" || status === "finalized") {
+      return "success" as const;
+    }
     if (status === "disconnected") return "danger" as const;
     return "default" as const;
   }, [status]);
 
+  const sessionFinished = status === "completed" || status === "finalized";
+
   const finalize = async () => {
-    if (!sessionId) return;
+    if (!sessionId || isFinalizing || sessionFinished) return;
+    setIsFinalizing(true);
+    setError(null);
     try {
       await api.finalize(sessionId);
       setStatus("finalized");
+      toast({
+        title: "Report finalized",
+        description: "The interview report has been generated and saved.",
+        tone: "success",
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      toast({ title: "Could not finalize report", description: message, tone: "error" });
+    } finally {
+      setIsFinalizing(false);
     }
   };
 
@@ -134,37 +168,47 @@ function LiveDashboardInner() {
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <div className="inline-flex rounded-md border bg-muted p-1">
-              <button
+              <Button
                 type="button"
-                onClick={() => changeMode("interviewer")}
-                className={`rounded px-3 py-1 text-xs font-medium ${
+                size="sm"
+                variant="ghost"
+                onClick={() => void changeMode("interviewer")}
+                disabled={!sessionId || !!modeSaving}
+                loading={modeSaving === "interviewer"}
+                className={`h-7 rounded px-3 py-1 text-xs ${
                   assistMode === "interviewer"
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground"
                 }`}
               >
                 Interviewer
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                onClick={() => changeMode("interviewee")}
-                className={`rounded px-3 py-1 text-xs font-medium ${
+                size="sm"
+                variant="ghost"
+                onClick={() => void changeMode("interviewee")}
+                disabled={!sessionId || !!modeSaving}
+                loading={modeSaving === "interviewee"}
+                className={`h-7 rounded px-3 py-1 text-xs ${
                   assistMode === "interviewee"
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground"
                 }`}
               >
                 Interviewee
-              </button>
+              </Button>
             </div>
             <Badge tone={tone}>{status}</Badge>
-            <button
-              onClick={finalize}
-              disabled={!sessionId}
-              className="inline-flex h-9 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            <Button
+              onClick={() => void finalize()}
+              disabled={!sessionId || sessionFinished}
+              loading={isFinalizing}
+              loadingLabel="Finalizing…"
+              className="h-9 px-3"
             >
-              Finalize report
-            </button>
+              {sessionFinished ? "Report finalized" : "Finalize report"}
+            </Button>
           </div>
         </CardHeader>
         {error && (
@@ -184,7 +228,13 @@ function LiveDashboardInner() {
         )}
       </Card>
 
-      <AskQuestionBox sessionId={sessionId} mode={assistMode} />
+      <AskQuestionBox
+        sessionId={sessionId}
+        mode={assistMode}
+        disabled={sessionFinished}
+        onTranscriptSegment={(segment) => setSegments((prev) => mergeSegment(prev, segment))}
+        onHint={(hint) => setHints((prev) => mergeHint(prev, hint))}
+      />
 
       <div className="grid gap-4 lg:grid-cols-3 lg:[grid-template-rows:minmax(0,1fr)] lg:h-[70vh]">
         <TranscriptPane segments={segments} />
@@ -197,7 +247,7 @@ function LiveDashboardInner() {
 
 function mergeSegment(prev: TranscriptSegment[], next: TranscriptSegment): TranscriptSegment[] {
   if (next.is_final) {
-    return [...prev.filter((segment) => segment.is_final), next];
+    return [...prev.filter((segment) => segment.is_final && segment.id !== next.id), next];
   }
 
   const idx = prev.findIndex((s) => s.id === next.id);
@@ -205,4 +255,8 @@ function mergeSegment(prev: TranscriptSegment[], next: TranscriptSegment): Trans
   const copy = prev.slice();
   copy[idx] = next;
   return copy;
+}
+
+function mergeHint(prev: AIHint[], next: AIHint): AIHint[] {
+  return [next, ...prev.filter((hint) => hint.id !== next.id)].slice(0, 50);
 }

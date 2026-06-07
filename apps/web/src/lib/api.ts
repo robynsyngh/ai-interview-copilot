@@ -1,8 +1,10 @@
 import type {
+  AIHint,
   AssistMode,
   CreateSessionRequest,
   CreateSessionResponse,
   SessionInfoResponse,
+  TranscriptSegment,
 } from "@copilot/shared";
 
 // The browser talks to the host-published API (localhost:8000). But during
@@ -85,17 +87,8 @@ export const api = {
       body: JSON.stringify({ mode }),
     }),
   askQuestion: (sessionId: string, question: string) =>
-    http<{ hint: AIHintPayload }>(`/api/session/${sessionId}/ask`, {
+    http<{ hint: AIHint; segment: TranscriptSegment }>(`/api/session/${sessionId}/ask`, {
       method: "POST",
       body: JSON.stringify({ question }),
     }),
 };
-
-export interface AIHintPayload {
-  id: string;
-  session_id: string;
-  kind: string;
-  content: string;
-  score_delta: number | null;
-  created_at: string;
-}

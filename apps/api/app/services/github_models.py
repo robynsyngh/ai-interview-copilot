@@ -380,7 +380,7 @@ class GitHubModelsEvaluator:
         every provider is exhausted/unavailable.
         """
         if not self._providers:
-            log.debug("model_providers_missing", event=log_event)
+            log.debug("model_providers_missing", op=log_event)
             return None
 
         for provider in self._providers:
@@ -390,7 +390,7 @@ class GitHubModelsEvaluator:
                 log.debug(
                     "model_provider_cooldown_skip",
                     provider=provider.name,
-                    event=log_event,
+                    op=log_event,
                     retry_in_s=round(remaining),
                 )
                 continue
@@ -409,7 +409,7 @@ class GitHubModelsEvaluator:
                 log.warning(
                     "model_request_failed",
                     provider=provider.name,
-                    event=log_event,
+                    op=log_event,
                     error=str(exc),
                 )
                 continue
@@ -420,7 +420,7 @@ class GitHubModelsEvaluator:
                 log.warning(
                     "model_rate_limited",
                     provider=provider.name,
-                    event=log_event,
+                    op=log_event,
                     retry_after_s=round(wait),
                     body=response.text[:300],
                 )
@@ -430,7 +430,7 @@ class GitHubModelsEvaluator:
                 log.warning(
                     "model_http_error",
                     provider=provider.name,
-                    event=log_event,
+                    op=log_event,
                     status=response.status_code,
                     body=response.text[:400],
                 )
@@ -444,20 +444,20 @@ class GitHubModelsEvaluator:
                 log.warning(
                     "model_bad_response",
                     provider=provider.name,
-                    event=log_event,
+                    op=log_event,
                     error=str(exc),
                     body=response.text[:400],
                 )
                 continue
 
             if not isinstance(parsed, dict):
-                log.warning("model_non_object_json", provider=provider.name, event=log_event)
+                log.warning("model_non_object_json", provider=provider.name, op=log_event)
                 continue
 
-            log.info("model_completion", provider=provider.name, event=log_event)
+            log.info("model_completion", provider=provider.name, op=log_event)
             return parsed
 
-        log.warning("model_all_providers_failed", event=log_event)
+        log.warning("model_all_providers_failed", op=log_event)
         return None
 
     async def propose_hint(
@@ -481,9 +481,7 @@ class GitHubModelsEvaluator:
             f"# Candidate resume excerpt - background only\n{resume_text.strip()[:1200]}"
         )
 
-        system_prompt = (
-            _CANDIDATE_HINT_SYSTEM_PROMPT if mode == "interviewee" else _SYSTEM_PROMPT
-        )
+        system_prompt = _CANDIDATE_HINT_SYSTEM_PROMPT if mode == "interviewee" else _SYSTEM_PROMPT
         parsed = await self._complete_json(
             messages=[
                 {"role": "system", "content": system_prompt},

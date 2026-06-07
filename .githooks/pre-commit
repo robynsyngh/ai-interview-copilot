@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+#
+# pre-commit: lint + type-check only the workspaces that have staged changes.
+#   - apps/web         -> next lint (incl. naming rules) + tsc --noEmit
+#   - apps/extension   -> tsc --noEmit
+#   - packages/shared  -> tsc --noEmit
+#   - apps/api (*.py)  -> ruff check + ruff format --check (naming via pep8-naming "N")
+#
+# Bypass in an emergency with:  git commit --no-verify   (discouraged)
+
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+# Staged files that are Added/Copied/Modified/Renamed (skip deletions).
+STAGED="$(git diff --cached --name-only --diff-filter=ACMR)"
+if [ -z "$STAGED" ]; then
+  exit 0
+fi
+
+RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; DIM=$'\033[2m'; NC=$'\033[0m'
+FAILED=0
+
+info()  { printf "%s\n" "${DIM}• $*${NC}"; }
+pass()  { printf "%s\n" "${GREEN}✓ $*${NC}"; }
+fail()  { printf "%s\n" "${RED}✗ $*${NC}"; FAILED=1; }
+
+# matches <regex> -> true if any staged file matches the extended regex
+matches() { printf "%s\n" "$STAGED" | grep -Eq "$1"; }
+
+run() {
+  # run "<label>" <command...>
+  local label="$1"; shift
+  info "$label: $*"
+  if "$@"; then
+    pass "$label"
+  else
+    fail "$label"
+  fi
+}
+
+# ---- TypeScript / JavaScript ---------------------------------------------
+if matches '^apps/web/.*\.(ts|tsx|js|jsx)$'; then
+  run "web · eslint"    pnpm --filter @copilot/web lint
+  run "web · typecheck" pnpm --filter @copilot/web typecheck
+fi
+
+if matches '^apps/extension/.*\.(ts|tsx)$'; then
+  run "extension · typecheck" pnpm --filter @copilot/extension typecheck
+fi
+
+if matches '^packages/shared/.*\.ts$'; then
+  run "shared · typecheck" pnpm --filter @copilot/shared typecheck
+fi
+
+# ---- Python (apps/api) ----------------------------------------------------
+# Lint only the staged Python files (lint-staged style) so unrelated pre-existing
+# debt never blocks a commit. Prefer a local ruff; otherwise fall back to the
+# official ruff Docker image so the check still runs with no global install.
+PY_STAGED="$(printf '%s\n' "$STAGED" | grep -E '^apps/api/.*\.py$' || true)"
+if [ -n "$PY_STAGED" ]; then
+  # shellcheck disable=SC2086  (intentional word-splitting of the file list)
+  if command -v ruff >/dev/null 2>&1; then
+    run "api · ruff check"  ruff check $PY_STAGED
+    run "api · ruff format" ruff format --check $PY_STAGED
+  elif python3 -m ruff --version >/dev/null 2>&1; then
+    run "api · ruff check"  python3 -m ruff check $PY_STAGED
+    run "api · ruff format" python3 -m ruff format --check $PY_STAGED
+  elif command -v uvx >/dev/null 2>&1; then
+    run "api · ruff check"  uvx ruff check $PY_STAGED
+    run "api · ruff format" uvx ruff format --check $PY_STAGED
+  elif command -v docker >/dev/null 2>&1; then
+    info "ruff not found locally — using ghcr.io/astral-sh/ruff Docker image"
+    RUFF_IMG="ghcr.io/astral-sh/ruff:latest"
+    run "api · ruff check"  docker run --rm -v "$REPO_ROOT:/io" -w /io "$RUFF_IMG" check $PY_STAGED
+    run "api · ruff format" docker run --rm -v "$REPO_ROOT:/io" -w /io "$RUFF_IMG" format --check $PY_STAGED
+  else
+    fail "api · ruff not found. Install it (pip install ruff / pipx install ruff) or install Docker."
+  fi
+fi
+
+echo
+if [ "$FAILED" -ne 0 ]; then
+  printf "%s\n" "${RED}Pre-commit checks failed.${NC} Fix the issues above, then re-stage and commit."
+  printf "%s\n" "${YELLOW}To bypass in an emergency: git commit --no-verify${NC}"
+  exit 1
+fi
+
+pass "All pre-commit checks passed."
+exit 0
