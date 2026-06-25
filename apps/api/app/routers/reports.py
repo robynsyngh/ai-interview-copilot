@@ -49,7 +49,9 @@ async def delete_all_reports(db: Session = Depends(get_session)) -> dict[str, in
 
 
 @router.delete("/{session_id}")
-async def delete_report(session_id: uuid.UUID, db: Session = Depends(get_session)) -> dict[str, str]:
+async def delete_report(
+    session_id: uuid.UUID, db: Session = Depends(get_session)
+) -> dict[str, str]:
     """Delete a single interview session and all of its associated data."""
     session = db.get(InterviewSession, session_id)
     if session is None:
@@ -64,9 +66,7 @@ async def get_report(session_id: uuid.UUID, db: Session = Depends(get_session)) 
     session = db.get(InterviewSession, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    report = db.exec(
-        select(FinalReport).where(FinalReport.session_id == session_id)
-    ).first()
+    report = db.exec(select(FinalReport).where(FinalReport.session_id == session_id)).first()
     return {
         "session_id": str(session.id),
         "candidate_name": session.candidate_name,
@@ -88,8 +88,12 @@ def _serialize_report(report: FinalReport | None) -> dict[str, Any] | None:
         "communication_score": report.communication_score,
         "culture_fit_score": report.culture_fit_score,
         "summary": report.summary,
+        "technical_analysis": report.technical_analysis,
+        "communication_analysis": report.communication_analysis,
+        "culture_analysis": report.culture_analysis,
         "strengths": report.strengths,
         "weaknesses": report.weaknesses,
         "recommendation": report.recommendation.value,
+        "recommendation_rationale": report.recommendation_rationale,
         "created_at": report.created_at.isoformat(),
     }

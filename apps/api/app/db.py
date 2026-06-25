@@ -47,6 +47,14 @@ def _run_lightweight_migrations() -> None:
     statements = [
         "ALTER TABLE interview_session "
         "ADD COLUMN IF NOT EXISTS mode VARCHAR(20) NOT NULL DEFAULT 'interviewer'",
+        "ALTER TABLE final_report "
+        "ADD COLUMN IF NOT EXISTS technical_analysis TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE final_report "
+        "ADD COLUMN IF NOT EXISTS communication_analysis TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE final_report "
+        "ADD COLUMN IF NOT EXISTS culture_analysis TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE final_report "
+        "ADD COLUMN IF NOT EXISTS recommendation_rationale TEXT NOT NULL DEFAULT ''",
     ]
     with engine.begin() as conn:
         for statement in statements:

@@ -37,6 +37,9 @@ class FinalReport(SQLModel, table=True):
     culture_fit_score: float = Field(default=0.0)
 
     summary: str = Field(default="")
+    technical_analysis: str = Field(default="")
+    communication_analysis: str = Field(default="")
+    culture_analysis: str = Field(default="")
     strengths: list[str] = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
     weaknesses: list[str] = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
 
@@ -44,6 +47,7 @@ class FinalReport(SQLModel, table=True):
         default=Recommendation.NO_HIRE,
         sa_column=Column(SQLEnum(Recommendation), nullable=False),
     )
+    recommendation_rationale: str = Field(default="")
 
     created_at: datetime = Field(
         default_factory=datetime.utcnow,

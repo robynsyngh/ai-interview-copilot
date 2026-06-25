@@ -2,10 +2,98 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Trash2 } from "lucide-react";
-import { api } from "@/lib/api";
+import { Check, Copy, Sparkles, Trash2 } from "lucide-react";
+import { api, type ReportDetail } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
+import { buildReportText } from "@/lib/report-format";
+
+export function CopyReportButton({ detail }: { detail: ReportDetail }) {
+  const [copied, setCopied] = useState(false);
+  const { toast } = useToast();
+
+  const handleCopy = async () => {
+    const text = buildReportText(detail);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      toast({
+        title: "Report copied",
+        description: "Paste it into an email or message to forward to HR.",
+        tone: "success",
+      });
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast({
+        title: "Could not copy",
+        description: "Your browser blocked clipboard access. Select and copy manually.",
+        tone: "error",
+      });
+    }
+  };
+
+  return (
+    <Button size="sm" variant="outline" onClick={() => void handleCopy()}>
+      {copied ? (
+        <Check className="mr-1.5 h-4 w-4" aria-hidden />
+      ) : (
+        <Copy className="mr-1.5 h-4 w-4" aria-hidden />
+      )}
+      {copied ? "Copied" : "Copy report for HR"}
+    </Button>
+  );
+}
+
+export function GenerateReportButton({
+  sessionId,
+  candidateName,
+}: {
+  sessionId: string;
+  candidateName: string | null;
+}) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  const handleGenerate = async () => {
+    setError(null);
+    setIsGenerating(true);
+    try {
+      await api.finalize(sessionId);
+      const label = candidateName ? `"${candidateName}"` : "this interview";
+      toast({
+        title: "Report generated",
+        description: `The final evaluation for ${label} is ready.`,
+        tone: "success",
+      });
+      startTransition(() => router.refresh());
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      toast({ title: "Could not generate report", description: message, tone: "error" });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  return (
+    <div className="space-y-1">
+      <Button
+        size="sm"
+        onClick={() => void handleGenerate()}
+        disabled={isPending}
+        loading={isGenerating}
+        loadingLabel="Generating…"
+      >
+        <Sparkles className="mr-1.5 h-4 w-4" aria-hidden />
+        Generate report
+      </Button>
+      {error && <span className="block text-xs text-destructive">{error}</span>}
+    </div>
+  );
+}
 
 export function DeleteReportButton({
   sessionId,

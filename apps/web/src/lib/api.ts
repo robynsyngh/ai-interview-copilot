@@ -30,6 +30,8 @@ export interface ReportListItem {
   report: ReportSummary | null;
 }
 
+export type RecommendationValue = "strong_hire" | "hire" | "no_hire" | "strong_no_hire";
+
 export interface ReportSummary {
   id: string;
   overall_score: number;
@@ -37,10 +39,24 @@ export interface ReportSummary {
   communication_score: number;
   culture_fit_score: number;
   summary: string;
+  technical_analysis: string;
+  communication_analysis: string;
+  culture_analysis: string;
   strengths: string[];
   weaknesses: string[];
-  recommendation: "strong_hire" | "hire" | "no_hire" | "strong_no_hire";
+  recommendation: RecommendationValue;
+  recommendation_rationale: string;
   created_at: string;
+}
+
+export interface ReportDetail {
+  session_id: string;
+  candidate_name: string | null;
+  job_description: string | null;
+  status: string;
+  created_at: string;
+  completed_at: string | null;
+  report: ReportSummary | null;
 }
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
@@ -71,6 +87,7 @@ export const api = {
       body: JSON.stringify({ session_id: sessionId }),
     }),
   listReports: () => http<ReportListItem[]>("/api/reports"),
+  getReport: (sessionId: string) => http<ReportDetail>(`/api/reports/${sessionId}`),
   deleteReport: (sessionId: string) =>
     http<{ deleted: string }>(`/api/reports/${sessionId}`, {
       method: "DELETE",

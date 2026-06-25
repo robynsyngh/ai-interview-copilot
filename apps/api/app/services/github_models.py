@@ -14,7 +14,7 @@ import json
 import re
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -41,6 +41,10 @@ class _Provider:
     name: str
     client: httpx.AsyncClient
     model: str
+    # Extra fields merged into every request body for this provider. Used to pass
+    # provider-specific knobs (e.g. Gemini 2.5 thinking control) without polluting
+    # the generic request path.
+    extra_body: dict[str, Any] = field(default_factory=dict)
 
 
 def _retry_after_seconds(response: httpx.Response) -> float:
@@ -103,22 +107,28 @@ CRITICAL EVIDENCE RULES (read carefully):
   - Any "interviewer hints", rubrics, or expected-answer notes are guidance for the interviewer. They describe what a GOOD answer WOULD contain. They are NOT things the candidate actually said. Never attribute hint/rubric content to the candidate.
   - Judge ONLY what the candidate actually said in their transcript turns. If the candidate did not answer a question, that is a gap, not a strength.
 
-SCORING:
-  - If the candidate gave little or no substantive answers, scores must be LOW (roughly 0-20) and the recommendation must be "strong_no_hire". Do not be polite or generous.
-  - Only give scores above 60 when the candidate's own words contain concrete, correct, relevant content.
-  - Every claim in the summary and strengths MUST quote or paraphrase something the candidate actually said.
+SCORING (all scores are on a 0 to 10 scale, one decimal place allowed):
+  - If the candidate gave little or no substantive answers, scores must be LOW (roughly 0-2) and the recommendation must be "strong_no_hire". Do not be polite or generous.
+  - Only give scores above 6 when the candidate's own words contain concrete, correct, relevant content.
+  - Every claim in the summary, strengths, and analysis MUST quote or paraphrase something the candidate actually said.
+
+This report is forwarded to HR / hiring managers, so the prose must be detailed, specific, and self-contained (an HR reader has NOT seen the interview). Write in clear, professional language.
 
 Reply with ONLY a single JSON object (no prose, no markdown fences) with these keys:
-  - "overall_score": number from 0 to 100
-  - "technical_score": number from 0 to 100
-  - "communication_score": number from 0 to 100
-  - "culture_fit_score": number from 0 to 100
-  - "summary": 2-4 sentence evidence-based summary grounded ONLY in what the candidate said
-  - "strengths": array of 0-5 concise strings (empty array if the candidate gave no real answers)
-  - "weaknesses": array of 1-5 concise strings
+  - "overall_score": number from 0 to 10
+  - "technical_score": number from 0 to 10
+  - "communication_score": number from 0 to 10
+  - "culture_fit_score": number from 0 to 10
+  - "summary": a detailed 4-6 sentence evidence-based overview grounded ONLY in what the candidate said
+  - "technical_analysis": 3-5 sentences assessing technical ability, citing specific things the candidate said (or did not say). State what was correct, what was missing, and the depth shown.
+  - "communication_analysis": 3-5 sentences on clarity, structure, and articulation, with concrete examples from the transcript.
+  - "culture_analysis": 2-4 sentences on collaboration, ownership, and attitude signals evident in the answers (or note the absence of evidence).
+  - "strengths": array of 0-6 concise but specific strings (empty array if the candidate gave no real answers)
+  - "weaknesses": array of 1-6 concise but specific strings
   - "recommendation": one of "strong_hire", "hire", "no_hire", "strong_no_hire"
+  - "recommendation_rationale": 2-4 sentences justifying the recommendation, suitable to paste into a hiring decision.
 
-If the candidate's transcript is empty or contains no real answers, return low scores, an empty strengths array, and clearly state in the summary that there was not enough evidence to evaluate the candidate."""
+If the candidate's transcript is empty or contains no real answers, return low scores (0-2), an empty strengths array, and clearly state in the summary and each analysis field that there was not enough evidence to evaluate the candidate."""
 
 
 _CANDIDATE_HINT_SYSTEM_PROMPT = """You are a real-time interview co-pilot for the CANDIDATE (the interviewee).
@@ -284,9 +294,13 @@ class FinalReportProposal:
         "communication_score",
         "culture_fit_score",
         "summary",
+        "technical_analysis",
+        "communication_analysis",
+        "culture_analysis",
         "strengths",
         "weaknesses",
         "recommendation",
+        "recommendation_rationale",
     )
 
     def __init__(
@@ -300,15 +314,23 @@ class FinalReportProposal:
         strengths: list[str],
         weaknesses: list[str],
         recommendation: Recommendation,
+        technical_analysis: str = "",
+        communication_analysis: str = "",
+        culture_analysis: str = "",
+        recommendation_rationale: str = "",
     ) -> None:
         self.overall_score = overall_score
         self.technical_score = technical_score
         self.communication_score = communication_score
         self.culture_fit_score = culture_fit_score
         self.summary = summary
+        self.technical_analysis = technical_analysis
+        self.communication_analysis = communication_analysis
+        self.culture_analysis = culture_analysis
         self.strengths = strengths
         self.weaknesses = weaknesses
         self.recommendation = recommendation
+        self.recommendation_rationale = recommendation_rationale
 
 
 class GitHubModelsEvaluator:
@@ -346,6 +368,13 @@ class GitHubModelsEvaluator:
                     base_url=s.gemini_endpoint,
                     timeout=timeout,
                     headers={**base_headers, "Authorization": f"Bearer {s.gemini_api_key}"},
+                ),
+                # Gemini 2.5 models are reasoning models: by default they spend the
+                # token budget on internal "thinking", which truncates our JSON
+                # output (finish_reason=length) and breaks parsing. Disable thinking
+                # so the full budget goes to the structured answer we actually need.
+                extra_body=(
+                    {"reasoning_effort": "none"} if s.gemini_model.startswith("gemini-2.5") else {}
                 ),
             ),
         }
@@ -401,6 +430,7 @@ class GitHubModelsEvaluator:
                 "temperature": temperature,
                 "max_tokens": max_tokens,
                 "response_format": {"type": "json_object"},
+                **provider.extra_body,
             }
 
             try:
@@ -544,7 +574,7 @@ class GitHubModelsEvaluator:
                 {"role": "system", "content": _FINAL_REPORT_SYSTEM_PROMPT},
                 {"role": "user", "content": user_payload},
             ],
-            max_tokens=800,
+            max_tokens=1400,
             log_event="report",
         )
         if parsed is None:
@@ -560,9 +590,13 @@ class GitHubModelsEvaluator:
             communication_score=self._coerce_score(parsed.get("communication_score")),
             culture_fit_score=self._coerce_score(parsed.get("culture_fit_score")),
             summary=summary,
+            technical_analysis=str(parsed.get("technical_analysis") or "").strip(),
+            communication_analysis=str(parsed.get("communication_analysis") or "").strip(),
+            culture_analysis=str(parsed.get("culture_analysis") or "").strip(),
             strengths=self._coerce_string_list(parsed.get("strengths")),
             weaknesses=self._coerce_string_list(parsed.get("weaknesses")),
             recommendation=self._coerce_recommendation(parsed.get("recommendation")),
+            recommendation_rationale=str(parsed.get("recommendation_rationale") or "").strip(),
         )
         log.info(
             "github_models_report",
@@ -834,13 +868,17 @@ class GitHubModelsEvaluator:
             f = float(value)
         except (TypeError, ValueError):
             return 0.0
-        return max(0.0, min(100.0, f))
+        # Scores are on a 0-10 scale. Tolerate a model that still answers 0-100
+        # by rescaling anything clearly above the 0-10 range.
+        if f > 10.0:
+            f = f / 10.0
+        return round(max(0.0, min(10.0, f)), 1)
 
     @staticmethod
     def _coerce_string_list(value: Any) -> list[str]:
         if not isinstance(value, list):
             return []
-        return [str(item).strip() for item in value if str(item).strip()][:5]
+        return [str(item).strip() for item in value if str(item).strip()][:6]
 
     @staticmethod
     def _coerce_recommendation(value: Any) -> Recommendation:

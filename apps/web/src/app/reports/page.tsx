@@ -1,8 +1,14 @@
 import Link from "next/link";
+import type { Route } from "next";
 import { api, type ReportListItem } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { DeleteAllReportsButton, DeleteReportButton } from "@/components/report-actions";
+import {
+  DeleteAllReportsButton,
+  DeleteReportButton,
+  GenerateReportButton,
+} from "@/components/report-actions";
+import { RECOMMENDATION_LABELS, recommendationTone } from "@/lib/report-format";
 
 export const dynamic = "force-dynamic";
 
@@ -69,20 +75,35 @@ export default async function ReportsPage() {
             <CardContent className="space-y-3 text-sm">
               {row.report ? (
                 <>
-                  <p className="text-muted-foreground">{row.report.summary}</p>
+                  <Badge tone={recommendationTone(row.report.recommendation)}>
+                    {RECOMMENDATION_LABELS[row.report.recommendation]}
+                  </Badge>
+                  <p className="line-clamp-3 text-muted-foreground">{row.report.summary}</p>
                   <div className="grid grid-cols-4 gap-2 text-xs">
                     <ScorePill label="Overall" value={row.report.overall_score} />
                     <ScorePill label="Tech" value={row.report.technical_score} />
                     <ScorePill label="Comm" value={row.report.communication_score} />
                     <ScorePill label="Culture" value={row.report.culture_fit_score} />
                   </div>
+                  <Link
+                    href={`/reports/${row.session_id}` as Route}
+                    className="inline-block rounded text-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    View full report →
+                  </Link>
                 </>
               ) : (
-                <p className="text-muted-foreground">No final report yet.</p>
+                <div className="space-y-3">
+                  <p className="text-muted-foreground">No final report yet.</p>
+                  <GenerateReportButton
+                    sessionId={row.session_id}
+                    candidateName={row.candidate_name}
+                  />
+                </div>
               )}
               <Link
                 href={`/interview/live?sessionId=${row.session_id}`}
-                className="inline-block rounded text-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="inline-block rounded text-sm font-medium text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 Reopen live view →
               </Link>
@@ -98,7 +119,10 @@ function ScorePill({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-md bg-muted px-2 py-1 text-center">
       <div className="text-[10px] uppercase text-muted-foreground">{label}</div>
-      <div className="font-semibold">{value.toFixed(1)}</div>
+      <div className="font-semibold">
+        {value.toFixed(1)}
+        <span className="text-[10px] font-normal text-muted-foreground">/10</span>
+      </div>
     </div>
   );
 }

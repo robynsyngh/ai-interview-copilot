@@ -133,10 +133,14 @@ function LiveDashboardInner() {
     return "default" as const;
   }, [status]);
 
-  const sessionFinished = status === "completed" || status === "finalized";
+  // The interview is over (stop pressed) once the backend reports "completed".
+  // The report is only "finalized" after a successful finalize call (client-only
+  // status) - stopping the interview must NOT lock the finalize button.
+  const interviewEnded = status === "completed" || status === "finalized";
+  const reportFinalized = status === "finalized";
 
   const finalize = async () => {
-    if (!sessionId || isFinalizing || sessionFinished) return;
+    if (!sessionId || isFinalizing || reportFinalized) return;
     setIsFinalizing(true);
     setError(null);
     try {
@@ -202,12 +206,12 @@ function LiveDashboardInner() {
             <Badge tone={tone}>{status}</Badge>
             <Button
               onClick={() => void finalize()}
-              disabled={!sessionId || sessionFinished}
+              disabled={!sessionId || reportFinalized}
               loading={isFinalizing}
               loadingLabel="Finalizing…"
               className="h-9 px-3"
             >
-              {sessionFinished ? "Report finalized" : "Finalize report"}
+              {reportFinalized ? "Report finalized" : "Finalize report"}
             </Button>
           </div>
         </CardHeader>
@@ -231,7 +235,7 @@ function LiveDashboardInner() {
       <AskQuestionBox
         sessionId={sessionId}
         mode={assistMode}
-        disabled={sessionFinished}
+        disabled={interviewEnded}
         onTranscriptSegment={(segment) => setSegments((prev) => mergeSegment(prev, segment))}
         onHint={(hint) => setHints((prev) => mergeHint(prev, hint))}
       />
